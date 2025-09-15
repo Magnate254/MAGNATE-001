@@ -1,15 +1,26 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, date
 
 st.set_page_config(page_title="POS System", layout="wide")
 
 # --- Initialize session state ---
 if "products" not in st.session_state:
     st.session_state.products = pd.DataFrame([
-        {"id": "p1", "sku": "1001", "name": "Orthopedic Knee Brace", "price": 2500, "stock": 10},
-        {"id": "p2", "sku": "1002", "name": "Spine Support Belt", "price": 1800, "stock": 8},
-        {"id": "p3", "sku": "1003", "name": "Ankle Walker", "price": 3200, "stock": 5},
+        {
+            "id": "p1", "sku": "1001", "name": "Orthopedic Knee Brace",
+            "category": "Braces", "supplier": "MedSupplies Ltd",
+            "cost_price": 1500, "price": 2500, "wholesale_price": 2200,
+            "stock": 10, "reorder_level": 5, "expiry": None,
+            "barcode": "111111", "uom": "Piece", "notes": "Adjustable size"
+        },
+        {
+            "id": "p2", "sku": "1002", "name": "Spine Support Belt",
+            "category": "Supports", "supplier": "OrthoImports",
+            "cost_price": 1200, "price": 1800, "wholesale_price": 1500,
+            "stock": 8, "reorder_level": 3, "expiry": None,
+            "barcode": "222222", "uom": "Piece", "notes": ""
+        },
     ])
 
 if "cart" not in st.session_state:
@@ -61,7 +72,7 @@ def checkout(customer, payment):
 # --- Layout ---
 st.title("💳 Point of Sale (Streamlit)")
 
-tabs = st.tabs(["🛍️ Products", "🛒 Cart", "📊 Reports"])
+tabs = st.tabs(["🛍️ Products", "🛒 Cart", "📦 Inventory", "📊 Reports"])
 
 # --- Products tab ---
 with tabs[0]:
@@ -70,7 +81,7 @@ with tabs[0]:
     df = st.session_state.products
     if search:
         df = df[df["name"].str.contains(search, case=False) | df["sku"].str.contains(search)]
-    st.dataframe(df, use_container_width=True)
+    st.dataframe(df[["sku", "name", "price", "stock"]], use_container_width=True)
 
     col1, col2 = st.columns([2, 1])
     with col1:
@@ -105,8 +116,71 @@ with tabs[1]:
             if st.button("Confirm Payment"):
                 checkout(customer, payment)
 
-# --- Reports tab ---
+# --- Inventory tab ---
 with tabs[2]:
+    st.subheader("Inventory Management")
+
+    df = st.session_state.products.copy()
+
+    for idx, row in df.iterrows():
+        st.markdown(f"### {row['name']} (SKU: {row['sku']})")
+        cols = st.columns([2, 2, 2, 2, 2, 2])
+        cols[0].write(f"Category: {row['category']}")
+        cols[1].write(f"Supplier: {row['supplier']}")
+        cols[2].write(f"Cost: KES {row['cost_price']:,}")
+        cols[3].write(f"Price: KES {row['price']:,}")
+        cols[4].write(f"Wholesale: KES {row['wholesale_price']:,}")
+        cols[5].write(f"UOM: {row['uom']}")
+
+        stock_col, reorder_col, expiry_col = st.columns([2,2,2])
+        new_stock = stock_col.number_input("Stock", 0, 9999, int(row["stock"]), key=f"stock_{row['id']}")
+        new_reorder = reorder_col.number_input("Reorder Level", 0, 1000, int(row["reorder_level"]), key=f"reorder_{row['id']}")
+        new_expiry = expiry_col.date_input("Expiry", value=row["expiry"] if row["expiry"] else date.today(), key=f"exp_{row['id']}")
+
+        st.session_state.products.at[idx, "stock"] = new_stock
+        st.session_state.products.at[idx, "reorder_level"] = new_reorder
+        st.session_state.products.at[idx, "expiry"] = new_expiry
+
+        notes = st.text_area("Notes", value=row["notes"], key=f"notes_{row['id']}")
+        st.session_state.products.at[idx, "notes"] = notes
+
+        if st.button("❌ Delete", key=f"del_{row['id']}"):
+            st.session_state.products = st.session_state.products.drop(idx)
+            st.rerun()
+        st.markdown("---")
+
+    st.subheader("➕ Add New Product")
+    with st.form("add_product_form"):
+        sku = st.text_input("SKU")
+        name = st.text_input("Name")
+        category = st.selectbox("Category", ["Braces", "Supports", "Implants", "Consumables", "Other"])
+        supplier = st.text_input("Supplier")
+        cost_price = st.number_input("Cost Price (KES)", 0, 1_000_000, 0)
+        price = st.number_input("Selling Price (KES)", 0, 1_000_000, 0)
+        wholesale_price = st.number_input("Wholesale Price (KES)", 0, 1_000_000, 0)
+        stock = st.number_input("Initial Stock", 0, 1000, 0)
+        reorder_level = st.number_input("Reorder Level", 0, 1000, 5)
+        expiry_date = st.date_input("Expiry Date")
+        barcode = st.text_input("Barcode / QR Code")
+        uom = st.selectbox("Unit of Measure", ["Piece", "Box", "Pack", "Set"])
+        notes = st.text_area("Notes / Description")
+        submitted = st.form_submit_button("Add Product")
+        if submitted:
+            new_id = f"p{len(st.session_state.products)+1}"
+            new_product = {
+                "id": new_id, "sku": sku, "name": name, "category": category,
+                "supplier": supplier, "cost_price": cost_price, "price": price,
+                "wholesale_price": wholesale_price, "stock": stock, "reorder_level": reorder_level,
+                "expiry": expiry_date, "barcode": barcode, "uom": uom, "notes": notes
+            }
+            st.session_state.products = pd.concat(
+                [st.session_state.products, pd.DataFrame([new_product])],
+                ignore_index=True
+            )
+            st.success(f"Product {name} added!")
+
+# --- Reports tab ---
+with tabs[3]:
     st.subheader("Sales Reports")
     if not st.session_state.sales:
         st.info("No sales yet")
